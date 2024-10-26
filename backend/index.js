@@ -1,4 +1,3 @@
-
 const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
@@ -147,36 +146,8 @@ app.get('/api/buyer/:id', async (req, res) => {
   }
 });
 
-// // Farmer Registration Route
-// app.post('/api/farmer-register', async (req, res) => {
-//   const { firstName, lastName, email, password } = req.body;
 
-//   try {
-//     // Check if the farmer already exists by email
-//     const existingFarmer = await Farmer.findOne({ email });
-//     if (existingFarmer) {
-//       return res.status(400).json({ success: false, message: 'Farmer already exists with this email.' });
-//     }
 
-//     // Validate password
-//     if (!validatePassword(password)) {
-//       return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long and contain at least one letter and one number.' });
-//     }
-
-//     // Hash the password
-//     const hashedPassword = await bcrypt.hash(password, 10);
-
-//     // Create a new farmer
-//     const newFarmer = new Farmer({ firstName, lastName, email, password: hashedPassword });
-
-//     // Save the farmer to the database
-//     await newFarmer.save();
-//     res.status(201).json({ success: true, message: 'Farmer registered successfully!' });
-//   } catch (error) {
-//     console.error('Registration error:', error);
-//     res.status(500).json({ success: false, message: 'Error registering farmer' });
-//   }
-// });
 // Farmer Registration Route
 
 app.post('/api/farmer-register', async (req, res) => {
@@ -310,6 +281,23 @@ app.get('/api/farmer-products', async (req, res) => {
   }
 });
 
+// Route to get buyer details using email
+app.get('/api/buyer-details', async (req, res) => {
+  const { email } = req.query; // Get email from query parameters
+
+  try {
+    const buyer = await Buyer.findOne({ email });
+    if (!buyer) {
+      return res.status(404).json({ success: false, message: 'Buyer not found' });
+    }
+    res.json({ success: true, buyer });
+  } catch (error) {
+    console.error('Error fetching buyer details:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+
 // PUT route for updating a product
 app.put('/api/products/:id', upload.single('productImage'), async (req, res) => {
   const productId = req.params.id;
@@ -378,6 +366,91 @@ app.get('/api/farmer-details', async (req, res) => {
       res.json({ success: true, farmer });
   } catch (error) {
       res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+const cartItemSchema = new mongoose.Schema({
+  productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+  quantity: { type: Number, required: true },
+  buyerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Buyer', required: true },
+});
+
+const CartItem = mongoose.model('CartItem', cartItemSchema);
+
+// Add item to cart or update the quantity if it exists
+app.post('/api/cart', async (req, res) => {
+  const { productId, quantity, buyerId } = req.body;
+
+  try {
+    // Check if the product exists in the inventory
+    const product = await Product.findById(productId);
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Product not found' });
+    }
+
+    // Validate that the requested quantity is positive and doesn't exceed available stock
+    if (quantity <= 0) {
+      return res.status(400).json({ success: false, message: 'Quantity must be greater than zero' });
+    }
+
+    if (quantity > product.quantity) {
+      return res.status(400).json({ success: false, message: `Only ${product.quantity} units are available for this product` });
+    }
+
+    // Check if the cart already has the product
+    const existingCartItem = await CartItem.findOne({ productId, buyerId });
+
+    if (existingCartItem) {
+      const newQuantity = existingCartItem.quantity + quantity;
+
+      // Validate new total quantity
+      if (newQuantity > product.quantity) {
+        return res.status(400).json({ success: false, message: `Cannot add more than ${product.quantity} units to the cart` });
+      }
+
+      existingCartItem.quantity = newQuantity; // Update the cart item with new quantity
+      await existingCartItem.save();
+      res.json({ success: true, message: 'Cart updated with new quantity' });
+    } else {
+      // Create a new cart item if it doesn't exist
+      const newCartItem = new CartItem({ productId, quantity, buyerId });
+      await newCartItem.save();
+      res.status(201).json({ success: true, message: 'Product added to cart' });
+    }
+  } catch (error) {
+    console.error('Error adding to cart:', error);
+    res.status(500).json({ success: false, message: 'Error adding item to cart' });
+  }
+});
+
+// Get cart items for a buyer
+app.get('/api/cart/:buyerId', async (req, res) => {
+  try {
+    const cartItems = await CartItem.find({ buyerId: req.params.buyerId }).populate('productId');
+    if (!cartItems || cartItems.length === 0) {
+      return res.status(404).json({ success: false, message: 'No items in cart' });
+    }
+
+    res.json({ success: true, cartItems });
+  } catch (error) {
+    console.error('Error fetching cart items:', error);
+    res.status(500).json({ success: false, message: 'Error fetching cart items' });
+  }
+});
+
+// Remove item from cart
+app.delete('/api/cart/:id', async (req, res) => {
+  try {
+    const deletedCartItem = await CartItem.findByIdAndDelete(req.params.id);
+
+    if (!deletedCartItem) {
+      return res.status(404).json({ success: false, message: 'Cart item not found' });
+    }
+
+    res.json({ success: true, message: 'Item removed from cart' });
+  } catch (error) {
+    console.error('Error removing cart item:', error);
+    res.status(500).json({ success: false, message: 'Error removing item from cart' });
   }
 });
 
